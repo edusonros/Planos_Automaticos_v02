@@ -26,6 +26,8 @@ Public Class SourcePropertiesData
 End Class
 
 Public Class SolidEdgePropertyService
+    ' Modo conservador para reducir lectura/revisión de propiedades no necesarias.
+    Private Const LeanPropertyScope As Boolean = True
     Private Enum PropertyWriteStatus
         Updated = 0
         Added = 1
@@ -93,18 +95,20 @@ Public Class SolidEdgePropertyService
             ' Peso: no usar Mass de PropertySets estándar; solo Custom o geometría (GetPesoModelo).
             data.Weight = FirstNonEmpty(GetDocumentProperty(doc, "Custom", {"Peso", "Weight"}))
             If Not String.IsNullOrWhiteSpace(data.Weight) Then data.WeightSource = "Custom.Peso"
-            data.Equipment = GetDocumentProperty(doc, "Custom", {"Equipo", "Equipment"})
             data.DrawingNumber = GetDocumentProperty(doc, "ProjectInformation", {"Document Number", "Part Number"})
             If String.IsNullOrWhiteSpace(data.DrawingNumber) Then
                 data.DrawingNumber = DrawingMetadataService.InferPlanoFromFileName(filePath)
             End If
             data.Revision = GetDocumentProperty(doc, "ProjectInformation", {"Revision", "Revision Number"})
-            data.Notes = GetDocumentProperty(doc, "SummaryInformation", {"Comments"})
-            If String.IsNullOrWhiteSpace(data.Notes) Then data.Notes = GetDocumentProperty(doc, "Custom", {"Observaciones", "Notes"})
             data.ClientName = FirstNonEmpty(
                 GetDocumentProperty(doc, "Custom", {"Cliente", "Client", "Empresa"}),
                 GetDocumentProperty(doc, "DocumentSummaryInformation", {"Company"})
             )
+            If Not LeanPropertyScope Then
+                data.Equipment = GetDocumentProperty(doc, "Custom", {"Equipo", "Equipment"})
+                data.Notes = GetDocumentProperty(doc, "SummaryInformation", {"Comments"})
+                If String.IsNullOrWhiteSpace(data.Notes) Then data.Notes = GetDocumentProperty(doc, "Custom", {"Observaciones", "Notes"})
+            End If
 
             If String.IsNullOrWhiteSpace(data.Weight) Then
                 Dim pesoProbe As New DrawingMetadataInput()
@@ -447,6 +451,57 @@ Public Class SolidEdgePropertyService
         Return written
     End Function
 
+    ''' <summary>
+    ''' Escribe SOLO propiedades mínimas para alimentar PART_LIST cuando InsertProps=False.
+    ''' No sincroniza cajetín completo ni Summary/Project estándar.
+    ''' </summary>
+    Public Shared Function ApplyEssentialPartListToOpenModelDocument(app As Application,
+                                                                     modelPath As String,
+                                                                     config As JobConfiguration,
+                                                                     logger As Logger) As Integer
+        If app Is Nothing OrElse config Is Nothing Then Return 0
+        If String.IsNullOrWhiteSpace(modelPath) OrElse Not IO.File.Exists(modelPath) Then Return 0
+
+        Dim doc As Object = Nothing
+        Dim openedByUs As Boolean = False
+        Dim written As Integer = 0
+        Try
+            doc = TryGetOpenDocumentByPath(app, modelPath)
+            If doc Is Nothing Then
+                doc = app.Documents.Open(modelPath)
+                openedByUs = True
+            End If
+            If doc Is Nothing Then
+                If logger IsNot Nothing Then logger.Log($"[PARTLISTDATA][WRITE][WARN] No se pudo abrir documento modelo: {modelPath}")
+                Return 0
+            End If
+
+            Dim profile = BuildEssentialPartListProfile(config)
+            written = ApplyProfileToOpenModelDocument(doc, profile, logger)
+
+            Dim saved As Boolean = False
+            If written > 0 Then
+                Try
+                    CallByName(doc, "Save", CallType.Method)
+                    saved = True
+                Catch exSave As Exception
+                    If logger IsNot Nothing Then logger.LogException("ApplyEssentialPartListToOpenModelDocument.Save", exSave)
+                End Try
+            End If
+            If logger IsNot Nothing Then
+                logger.Log($"[PARTLISTDATA][WRITE] Campos mínimos escritos en modelo={written}")
+                logger.Log($"[PARTLISTDATA][WRITE] Save={saved}")
+            End If
+        Catch ex As Exception
+            If logger IsNot Nothing Then logger.LogException("ApplyEssentialPartListToOpenModelDocument", ex)
+        Finally
+            If openedByUs AndAlso doc IsNot Nothing Then
+                Try : CallByName(doc, "Close", CallType.Method, False) : Catch : End Try
+            End If
+        End Try
+        Return written
+    End Function
+
     Public Shared Sub RefreshDraftFromModelLinks(dftDoc As Object, logger As Logger, Optional verboseLinks As Boolean = False)
         If dftDoc Is Nothing Then Return
         Try
@@ -731,7 +786,7 @@ Public Class SolidEdgePropertyService
         list.Add(order)
 
         Dim fechaVal = If(config.FechaPlano, "").Trim()
-        If fechaVal <> "" Then
+        If (Not LeanPropertyScope) AndAlso fechaVal <> "" Then
             Dim fecha = New PropertySyncEntry With {.LogicalName = "FechaPlano", .Value = fechaVal, .Target = PropertySyncTarget.Both}
             fecha.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "FechaPlano", .AllowCreate = True})
             list.Add(fecha)
@@ -742,6 +797,38 @@ Public Class SolidEdgePropertyService
             Dim peso = New PropertySyncEntry With {.LogicalName = "PesoMeta", .Value = pesoVal, .Target = PropertySyncTarget.Both}
             peso.StandardBindings.Add(New PropertyBinding With {.SetName = "MechanicalModeling", .PropertyName = "Mass", .AllowCreate = False})
             peso.StandardBindings.Add(New PropertyBinding With {.SetName = "ProjectInformation", .PropertyName = "Mass", .AllowCreate = False})
+            peso.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "Peso", .AllowCreate = True})
+            list.Add(peso)
+        End If
+
+        SubAddPartMeta(list, "L", config.PartListL)
+        SubAddPartMeta(list, "H", config.PartListH)
+        SubAddPartMeta(list, "D", config.PartListD)
+        SubAddPartMeta(list, "NombreArchivo", config.PartListNombreArchivo)
+        SubAddPartMeta(list, "Cantidad", config.PartListCantidad)
+
+        Return list
+    End Function
+
+    Private Shared Function BuildEssentialPartListProfile(config As JobConfiguration) As List(Of PropertySyncEntry)
+        Dim list As New List(Of PropertySyncEntry)()
+        If config Is Nothing Then Return list
+
+        Dim denom = New PropertySyncEntry With {.LogicalName = "Denominacion", .Value = If(config.DrawingTitle, "").Trim(), .Target = PropertySyncTarget.ModelOnly}
+        denom.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "Denominacion", .AllowCreate = True})
+        list.Add(denom)
+
+        Dim material = New PropertySyncEntry With {.LogicalName = "Material", .Value = If(config.Material, "").Trim(), .Target = PropertySyncTarget.ModelOnly}
+        material.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "Material", .AllowCreate = True})
+        list.Add(material)
+
+        Dim thickness = New PropertySyncEntry With {.LogicalName = "Espesor", .Value = If(config.Thickness, "").Trim(), .Target = PropertySyncTarget.ModelOnly}
+        thickness.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "Espesor", .AllowCreate = True})
+        list.Add(thickness)
+
+        Dim pesoVal = If(config.Weight, "").Trim()
+        If pesoVal <> "" Then
+            Dim peso = New PropertySyncEntry With {.LogicalName = "PesoMeta", .Value = pesoVal, .Target = PropertySyncTarget.ModelOnly}
             peso.CustomBindings.Add(New PropertyBinding With {.SetName = "Custom", .PropertyName = "Peso", .AllowCreate = True})
             list.Add(peso)
         End If
@@ -1465,7 +1552,7 @@ Public Class SolidEdgePropertyService
         Try
             Dim pset As Object = ResolvePropertySet(doc, setName)
             If pset Is Nothing Then
-                If logger IsNot Nothing Then
+                If logger IsNot Nothing AndAlso Not LeanPropertyScope Then
                     If setName.Equals("Custom", StringComparison.OrdinalIgnoreCase) Then
                         logger.Log($"[PROPS][WARN] PropertySet no encontrado: {setName}")
                     Else
@@ -1498,7 +1585,7 @@ Public Class SolidEdgePropertyService
                         If logger IsNot Nothing Then logger.Log($"[PROPS] {setName}.{propName} = '{value}' (add-alt)")
                         Return 1
                     Catch
-                        If logger IsNot Nothing Then
+                        If logger IsNot Nothing AndAlso Not LeanPropertyScope Then
                             If setName.Equals("Custom", StringComparison.OrdinalIgnoreCase) Then
                                 logger.Log($"[PROPS][WARN] No se pudo escribir {setName}.{propName}")
                             Else

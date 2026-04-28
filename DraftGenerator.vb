@@ -25,8 +25,14 @@ Public Module DraftGenerator
     Private Const ISO_MARGIN_MM As Double = 0.01   ' 10 mm espacio vacío antes del marco
     Private Const ISO_SEP_ABOVE_CAJETIN_MM As Double = 0.02   ' 20 mm separación sobre el cajetín
     ' Criterio A3 horizontal (plantilla de referencia):
-    ' bbox(vista principal) + gap + bbox(vista derecha) <= 0.37m
-    Private Const A3_MAIN_RIGHT_FREE_WIDTH_MM As Double = 0.37
+    ' bbox(vista principal) + gap + bbox(vista derecha) <= 0.36m
+    ' y la cota más a la derecha no debe superar ~0.4098 en coordenadas sheet.
+    Private Const A3_MAIN_RIGHT_FREE_WIDTH_MM As Double = 0.36
+    Private Const A3_RIGHTMOST_DIM_LIMIT_MM As Double = 0.4098
+    Private Const A3_RIGHT_VIEW_BBOX_MAX_X_MM As Double = 0.385
+    ' Límite para flat/chapa desarrollada.
+    Private Const FLAT_BBOX_MAX_W_MM As Double = 0.2
+    Private Const FLAT_BBOX_MAX_H_MM As Double = 0.08
 
     Private ReadOnly StandardScales As Double() = {
         1.0, 0.5, 0.2, 0.1, 0.05, 0.04, 1.0 / 30.0, 0.025, 0.02, 1.0 / 75.0, 0.01
@@ -111,6 +117,26 @@ Public Module DraftGenerator
         If dv Is Nothing Then Return
         Dim l As Double = 0, t As Double = 0
         If GetViewTopLeft(dv, l, t) Then Log($"[FOLD] {viewName} final top-left = ({l * 1000:0},{t * 1000:0})mm")
+    End Sub
+
+    Private Sub ClampViewMaxX(app As SolidEdgeFramework.Application, dv As DrawingView, maxX As Double, tag As String)
+        If dv Is Nothing Then Return
+        Dim xmin As Double, ymin As Double, xmax As Double, ymax As Double
+        If Not TryGetViewRange(dv, xmin, ymin, xmax, ymax) Then Return
+        If xmax <= maxX + 0.000001 Then
+            Log($"[LAYOUT][BBOX_LIMIT] {tag} maxX={xmax:0.######} within limit={maxX:0.######}")
+            Return
+        End If
+        Dim shiftLeft As Double = xmax - maxX
+        Dim targetLeft As Double = xmin - shiftLeft
+        Dim targetTop As Double = ymax
+        MoveViewTopLeft(app, dv, targetLeft, targetTop)
+        SafeUpdateView(dv)
+        DoIdle(app)
+        Dim x2 As Double, y2 As Double, x3 As Double, y3 As Double
+        If TryGetViewRange(dv, x2, y2, x3, y3) Then
+            Log($"[LAYOUT][BBOX_LIMIT] {tag} clamped maxX={x3:0.######} target={maxX:0.######}")
+        End If
     End Sub
 
     Private Sub ForceViewOrientation(dv As DrawingView, ori As Integer)
@@ -635,6 +661,7 @@ Public Module DraftGenerator
         Log($"[ORIGIN VARS] Área usable: MinX={usableArea.MinX * 1000:0}mm MaxX={usableArea.MaxX * 1000:0}mm MinY={usableArea.MinY * 1000:0}mm MaxY={usableArea.MaxY * 1000:0}mm")
         If isA3Template Then
             Log($"[LAYOUT][SCALE_RULE] A3 main+right free width criterion = {A3_MAIN_RIGHT_FREE_WIDTH_MM:0.###}m")
+            Log($"[LAYOUT][SCALE_RULE] A3 rightmost dimension limit = {A3_RIGHTMOST_DIM_LIMIT_MM:0.####}m")
         End If
         Log($"[ORIGIN VARS] --- BASE: X=40mm Y=260mm (origen fijo)")
         Log($"[ORIGIN VARS] --- RIGHT: X=40+baseW+25 = {layout.RightTopLeftX * 1000:0}mm | Y=baseY (misma que Base)")
@@ -703,6 +730,9 @@ Public Module DraftGenerator
 
                 Dim vRight As DrawingView = Nothing
                 If Not InsertFoldedView(app, sheet, vBase, FoldTypeConstants.igFoldRight, rightTargetLeft, rightTargetTop, vRight) Then Return Nothing
+                If Path.GetFileName(layout.TemplatePath).ToLowerInvariant().Contains("a3") Then
+                    ClampViewMaxX(app, vRight, A3_RIGHT_VIEW_BBOX_MAX_X_MM, "RightView")
+                End If
                 LogViewTopLeft(vRight, "right")
 
                 Dim vBelow As DrawingView = Nothing
@@ -740,22 +770,34 @@ Public Module DraftGenerator
                         SafeUpdateView(vFlat)
                         GetViewSize(vFlat, flatW, flatH)
 
-                        ' Verificar si la Flat cabe en el área usable; si no, escalar hacia abajo
+                        ' Verificar si la Flat cabe en el área usable y en bbox objetivo 0.20 x 0.08; si no, escalar hacia abajo
                         Dim usableMinY As Double = usableArea.MinY
                         Dim usableMaxX As Double = usableArea.MaxX
                         Dim flatBottom As Double = flatY - flatH
                         Dim flatRight As Double = flatX + flatW
                         Dim scaleY As Double = 1.0
                         If flatBottom < usableMinY AndAlso flatH > 0.0001 Then
-                            scaleY = Math.Max(0.05, (flatY - usableMinY) / flatH)
+                            scaleY = Math.Max(0.005, (flatY - usableMinY) / flatH)
                             Log($"[FLAT] Overflow vertical: bottom={flatBottom * 1000:0}mm < MinY={usableMinY * 1000:0}mm -> scaleY={scaleY:0.00}")
                         End If
                         Dim scaleX As Double = 1.0
                         If flatRight > usableMaxX AndAlso flatW > 0.0001 Then
-                            scaleX = Math.Max(0.05, (usableMaxX - flatX) / flatW)
+                            scaleX = Math.Max(0.005, (usableMaxX - flatX) / flatW)
                             Log($"[FLAT] Overflow horizontal: right={flatRight * 1000:0}mm > MaxX={usableMaxX * 1000:0}mm -> scaleX={scaleX:0.00}")
                         End If
-                        Dim scaleDown As Double = Math.Min(Math.Min(scaleY, scaleX), 1.0)
+
+                        Dim scaleBoxW As Double = 1.0
+                        Dim scaleBoxH As Double = 1.0
+                        If flatW > FLAT_BBOX_MAX_W_MM AndAlso flatW > 0.0001 Then
+                            scaleBoxW = Math.Max(0.005, FLAT_BBOX_MAX_W_MM / flatW)
+                            Log($"[FLAT] BBox width clamp: flatW={flatW * 1000:0}mm > {FLAT_BBOX_MAX_W_MM * 1000:0}mm -> scaleW={scaleBoxW:0.00}")
+                        End If
+                        If flatH > FLAT_BBOX_MAX_H_MM AndAlso flatH > 0.0001 Then
+                            scaleBoxH = Math.Max(0.005, FLAT_BBOX_MAX_H_MM / flatH)
+                            Log($"[FLAT] BBox height clamp: flatH={flatH * 1000:0}mm > {FLAT_BBOX_MAX_H_MM * 1000:0}mm -> scaleH={scaleBoxH:0.00}")
+                        End If
+
+                        Dim scaleDown As Double = Math.Min(Math.Min(Math.Min(scaleY, scaleX), Math.Min(scaleBoxW, scaleBoxH)), 1.0)
                         If scaleDown < 0.99 Then
                             Dim curSf As Double = layout.Scale
                             Try
@@ -768,6 +810,26 @@ Public Module DraftGenerator
                                 Log($"[FLAT] Scaled down to fit: ScaleFactor {curSf:0.00} -> {curSf * scaleDown:0.00} | new size={flatW * 1000:0}x{flatH * 1000:0}mm")
                             Catch exScale As Exception
                                 LogEx("[FLAT] ScaleFactor", exScale)
+                            End Try
+                        End If
+
+                        ' Corrección final obligatoria para garantizar bbox máximo 0.20 x 0.08.
+                        GetViewSize(vFlat, flatW, flatH)
+                        Dim strictScaleFix As Double = 1.0
+                        If flatW > FLAT_BBOX_MAX_W_MM AndAlso flatW > 0.000001 Then strictScaleFix = Math.Min(strictScaleFix, FLAT_BBOX_MAX_W_MM / flatW)
+                        If flatH > FLAT_BBOX_MAX_H_MM AndAlso flatH > 0.000001 Then strictScaleFix = Math.Min(strictScaleFix, FLAT_BBOX_MAX_H_MM / flatH)
+                        If strictScaleFix < 0.999 Then
+                            Try
+                                Dim curFlatScale As Double = CDbl(CallByName(vFlat, "ScaleFactor", CallType.Get))
+                                CallByName(vFlat, "ScaleFactor", CallType.Let, curFlatScale * strictScaleFix)
+                                SafeUpdateView(vFlat)
+                                DoIdle(app)
+                                MoveViewTopLeft(app, vFlat, flatX, flatY)
+                                SafeUpdateView(vFlat)
+                                GetViewSize(vFlat, flatW, flatH)
+                                Log($"[FLAT] Strict bbox enforce: final size={flatW:0.###}x{flatH:0.###}m (max={FLAT_BBOX_MAX_W_MM:0.###}x{FLAT_BBOX_MAX_H_MM:0.###}m)")
+                            Catch exStrict As Exception
+                                LogEx("[FLAT] StrictBBoxEnforce", exStrict)
                             End Try
                         End If
 

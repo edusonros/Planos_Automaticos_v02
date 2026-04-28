@@ -103,8 +103,18 @@ Partial Public Class MainForm
                 End Sub
 
             lblDrawingTitle.Text = "Nº Pedido"
-            lblPedido.Text = "Título"
+            lblDrawingNumber.Text = "Título"
+            lblPedido.Text = "Pedido"
             lblClient.Text = "Cliente"
+
+            ' Quitar campo duplicado de "Título" (fila Pedido) en la UI de cajetín.
+            If lblPedido IsNot Nothing Then lblPedido.Visible = False
+            If txtPedido IsNot Nothing Then txtPedido.Visible = False
+            If lblOriginPedido IsNot Nothing Then lblOriginPedido.Visible = False
+            If tblCaj.RowStyles.Count > 7 Then
+                tblCaj.RowStyles(7).SizeType = SizeType.Absolute
+                tblCaj.RowStyles(7).Height = 0.0F
+            End If
 
             tblTracePartInner = New TableLayoutPanel With {
                 .Dock = DockStyle.Fill,
@@ -248,8 +258,9 @@ Partial Public Class MainForm
             tblTrace.ColumnCount = 1
             tblTrace.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100.0!))
             tblTrace.RowCount = 2
-            tblTrace.RowStyles.Add(New RowStyle(SizeType.Percent, 50.0!))
-            tblTrace.RowStyles.Add(New RowStyle(SizeType.Percent, 50.0!))
+            ' Dar más altura a "Datos de pieza (PART LIST)".
+            tblTrace.RowStyles.Add(New RowStyle(SizeType.Percent, 40.0!))
+            tblTrace.RowStyles.Add(New RowStyle(SizeType.Percent, 60.0!))
             tblTrace.Controls.Add(grpPlanCajetinBox, 0, 0)
             tblTrace.Controls.Add(grpPlanPartListBox, 0, 1)
         Finally

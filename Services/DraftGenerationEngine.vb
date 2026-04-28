@@ -188,6 +188,9 @@ Public Class DraftGenerationEngine
 
         _logger.Log($"[{itemIndex}/{totalItems}] Procesando: {IOPath.GetFileName(modelPath)}")
 
+        ' Autorrelleno de metadatos PART_LIST sin intervención de botón (L/H/D y campos básicos).
+        AutoPopulatePartListMetadata(modelPath, config)
+
         If config.InsertPropertiesInTitleBlock AndAlso config.TitleBlockPropertySourceMode = TitleBlockPropertySource.FromModelLink Then
             Dim modelPreUpdates As Integer = SolidEdgePropertyService.ApplyPropertiesToOpenModelDocument(app, modelPath, config, _logger)
             _logger.Log($"[PROPS][MODEL] Escritura previa al draft completada. Campos={modelPreUpdates}")
@@ -203,6 +206,13 @@ Public Class DraftGenerationEngine
                 dftDoc = ExecuteComWithRetry(Function() CojonudoBestFit_Bueno.CreateDraftAlzadoPrimerDiedro(app, modelPath, dftTemplates, config.TemplateDxf, flatInserted, mainDrawingView), "CreateDraft")
                 If dftDoc IsNot Nothing Then
                     Dim savedDraftReady As Boolean = False
+                    If Not config.InsertPropertiesInTitleBlock Then
+                        ' Modo ligero: escribir mínimos de PART_LIST tras crear el DFT y refrescar enlaces.
+                        Dim partListUpdates As Integer = SolidEdgePropertyService.ApplyEssentialPartListToOpenModelDocument(app, modelPath, config, _logger)
+                        _logger.Log($"[PARTLISTDATA][WRITE] Escritura mínima post-create completada. Campos={partListUpdates}")
+                        SolidEdgePropertyService.RefreshDraftFromModelLinks(dftDoc, _logger, config.DebugTemplatesInspection)
+                    End If
+
                     If config.InsertPropertiesInTitleBlock Then
                         Dim needPreSaveSync As Boolean =
                             (config.TitleBlockPropertySourceMode = TitleBlockPropertySource.FromModelLink) OrElse
@@ -214,6 +224,12 @@ Public Class DraftGenerationEngine
                             _logger.Log("[PROPS] Modo FromDraft: se aplicará sobre DFT guardado (FileProperties) y fallback a documento abierto.")
                         End If
                     End If
+
+                    ' Garantizar que PART_LIST lea metadatos actualizados en el momento de crear/actualizar la tabla.
+                    ' Se ejecuta siempre aquí (independiente de InsertProps) para evitar desfasajes temporales.
+                    Dim partListSyncCount As Integer = SolidEdgePropertyService.ApplyEssentialPartListToOpenModelDocument(app, modelPath, config, _logger)
+                    _logger.Log($"[PARTLISTDATA][WRITE] Sync previo a PartsList (just-in-time). Campos={partListSyncCount}")
+                    SolidEdgePropertyService.RefreshDraftFromModelLinks(dftDoc, _logger, config.DebugTemplatesInspection)
 
                     If config.KeepSolidEdgeVisible Then
                         FitDraftView(app, dftDoc)
@@ -368,6 +384,36 @@ Public Class DraftGenerationEngine
             runResult.SkippedCount += 1
         End If
 
+    End Sub
+
+    Private Sub AutoPopulatePartListMetadata(modelPath As String, config As JobConfiguration)
+        If config Is Nothing OrElse String.IsNullOrWhiteSpace(modelPath) Then Return
+        Try
+            Dim src As SourcePropertiesData = Nothing
+            If Not SolidEdgePropertyService.TryReadSourceProperties(modelPath, False, _logger, src) Then Return
+            If src Is Nothing Then Return
+
+            If Not String.IsNullOrWhiteSpace(src.PartListL) Then config.PartListL = src.PartListL.Trim()
+            If Not String.IsNullOrWhiteSpace(src.PartListH) Then config.PartListH = src.PartListH.Trim()
+            If Not String.IsNullOrWhiteSpace(src.PartListD) Then config.PartListD = src.PartListD.Trim()
+
+            If String.IsNullOrWhiteSpace(config.Material) AndAlso Not String.IsNullOrWhiteSpace(src.Material) Then
+                config.Material = src.Material.Trim()
+            End If
+            If String.IsNullOrWhiteSpace(config.Thickness) AndAlso Not String.IsNullOrWhiteSpace(src.Thickness) Then
+                config.Thickness = src.Thickness.Trim()
+            End If
+            If String.IsNullOrWhiteSpace(config.Weight) AndAlso Not String.IsNullOrWhiteSpace(src.Weight) Then
+                config.Weight = src.Weight.Trim()
+            End If
+
+            config.PartListNombreArchivo = IOPath.GetFileName(modelPath)
+            If String.IsNullOrWhiteSpace(config.PartListCantidad) Then config.PartListCantidad = "1"
+
+            _logger.Log($"[PARTLISTDATA][AUTO] L={config.PartListL} H={config.PartListH} D={config.PartListD} NombreArchivo={config.PartListNombreArchivo} Cantidad={config.PartListCantidad}")
+        Catch ex As Exception
+            _logger.LogException("AutoPopulatePartListMetadata", ex)
+        End Try
     End Sub
 
     Private Function BuildTemplateList(config As JobConfiguration) As String()

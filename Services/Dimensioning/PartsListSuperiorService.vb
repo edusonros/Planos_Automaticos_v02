@@ -71,7 +71,7 @@ Public NotInheritable Class PartsListSuperiorService
             If pl Is Nothing Then Return Nothing
             ApplyPartsListPlacementAndRefresh(pl, sheet, config, Lg)
         Else
-            Dim z = CrearPartsListSuperiorDesdeVista(draftDoc, sheet, viewList, config, Lg)
+            Dim z = CrearPartsListSuperiorDesdeVista(draftDoc, sheet, viewList, config, Lg, modelPath)
             If z Is Nothing Then
                 Lg("[PARTSLIST][CREATE][FALLBACK] reason=native_failed_heuristic_zone")
                 Return BuildHeuristicTopZoneOnly(sheet, config, Lg)
@@ -98,7 +98,8 @@ Public NotInheritable Class PartsListSuperiorService
         sheet As Sheet,
         drawingViews As List(Of DrawingView),
         config As DimensioningNormConfig,
-        log As Action(Of String)) As ProtectedZone2D
+        log As Action(Of String),
+        Optional modelPath As String = Nothing) As ProtectedZone2D
 
         Dim Lg = Sub(m As String) log?.Invoke(m)
         If draftDoc Is Nothing OrElse sheet Is Nothing OrElse config Is Nothing Then Return Nothing
@@ -142,6 +143,7 @@ Public NotInheritable Class PartsListSuperiorService
         End If
 
         Lg("[PARTSLIST][ADD][OK]")
+        EnsurePartsListAssemblyLink(pl, modelPath, Lg)
 
         Try
             CallByName(pl, "Active", CallType.Let, True)
@@ -191,6 +193,46 @@ Public NotInheritable Class PartsListSuperiorService
         Dim zone = GetPartsListProtectedZone(pl, sheet, config, Lg, useHeuristic:=True)
         Return zone
     End Function
+
+    Private Shared Sub EnsurePartsListAssemblyLink(pl As Object, modelPath As String, log As Action(Of String))
+        If pl Is Nothing OrElse String.IsNullOrWhiteSpace(modelPath) Then Return
+        Try
+            Dim currentAsm As String = SafeProp(pl, "AssemblyFileName")
+            If ModelPathLikelyMatches(currentAsm, modelPath) Then
+                log?.Invoke("[PARTSLIST][LINK][OK] AssemblyFileName ya vinculado")
+                Return
+            End If
+
+            Dim linked As Boolean = False
+            Try
+                CallByName(pl, "AssemblyFileName", CallType.Let, modelPath)
+                linked = True
+            Catch
+            End Try
+            If Not linked Then
+                Try
+                    CallByName(pl, "AssemblyFile", CallType.Let, modelPath)
+                    linked = True
+                Catch
+                End Try
+            End If
+
+            If linked Then
+                log?.Invoke("[PARTSLIST][LINK][SET] modelPath=" & modelPath)
+                Try : CallByName(pl, "Update", CallType.Method) : Catch : End Try
+                Dim finalAsm As String = SafeProp(pl, "AssemblyFileName")
+                If ModelPathLikelyMatches(finalAsm, modelPath) Then
+                    log?.Invoke("[PARTSLIST][LINK][OK] AssemblyFileName actualizado")
+                Else
+                    log?.Invoke("[PARTSLIST][LINK][WARN] AssemblyFileName no coincide tras set; actual=" & finalAsm)
+                End If
+            Else
+                log?.Invoke("[PARTSLIST][LINK][WARN] No se pudo setear AssemblyFileName/AssemblyFile")
+            End If
+        Catch ex As Exception
+            log?.Invoke("[PARTSLIST][LINK][ERR] " & ex.Message)
+        End Try
+    End Sub
 
     Private Shared Function TryPartsListsAddEx(
         listsObj As Object,
@@ -631,13 +673,29 @@ Public NotInheritable Class PartsListSuperiorService
     End Sub
 
     Private Shared Function ModelPathLikelyMatches(assemblyFile As String, modelPath As String) As Boolean
+        If String.IsNullOrWhiteSpace(assemblyFile) OrElse String.IsNullOrWhiteSpace(modelPath) Then Return False
+        Dim a As String = assemblyFile.Trim()
+        Dim b As String = modelPath.Trim()
         Try
-            Dim a = Path.GetFullPath(assemblyFile)
-            Dim b = Path.GetFullPath(modelPath)
-            Return String.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+            a = Path.GetFullPath(a)
         Catch
-            Return String.Equals(Path.GetFileName(assemblyFile), Path.GetFileName(modelPath), StringComparison.OrdinalIgnoreCase)
         End Try
+        Try
+            b = Path.GetFullPath(b)
+        Catch
+        End Try
+
+        If String.Equals(a, b, StringComparison.OrdinalIgnoreCase) Then Return True
+        If String.Equals(Path.GetFileName(a), Path.GetFileName(b), StringComparison.OrdinalIgnoreCase) Then Return True
+        Return String.Equals(NormalizePathTail(a), NormalizePathTail(b), StringComparison.OrdinalIgnoreCase)
+    End Function
+
+    Private Shared Function NormalizePathTail(p As String) As String
+        If String.IsNullOrWhiteSpace(p) Then Return ""
+        Dim n As String = p.Replace("/", "\").Trim()
+        Dim parts = n.Split("\"c).Where(Function(x) Not String.IsNullOrWhiteSpace(x)).ToArray()
+        If parts.Length <= 4 Then Return String.Join("\", parts).ToLowerInvariant()
+        Return String.Join("\", parts.Skip(parts.Length - 4)).ToLowerInvariant()
     End Function
 
     Public Shared Function GetPartsListProtectedZone(

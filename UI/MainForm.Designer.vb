@@ -392,7 +392,7 @@ Partial Class MainForm
         Me.tblTrace.Controls.Add(Me.txtClient, 1, 3)
         Me.tblTrace.Controls.Add(Me.lblOriginClient, 2, 3)
 
-        Me.lblDrawingNumber.Text = "Plano" : Me.lblDrawingNumber.AutoSize = True : Me.lblDrawingNumber.Dock = DockStyle.Fill
+        Me.lblDrawingNumber.Text = "Título" : Me.lblDrawingNumber.AutoSize = True : Me.lblDrawingNumber.Dock = DockStyle.Fill
         Me.txtDrawingNumber.Dock = DockStyle.Fill
         Me.lblOriginDocNum.AutoSize = False : Me.lblOriginDocNum.Dock = DockStyle.Fill : Me.lblOriginDocNum.TextAlign = ContentAlignment.MiddleLeft
         Me.lblOriginDocNum.Font = New Font("Segoe UI", 8.0!, FontStyle.Italic)

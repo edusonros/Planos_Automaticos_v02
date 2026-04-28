@@ -10,6 +10,7 @@ Imports SolidEdgeFrameworkSupport
 Friend NotInheritable Class DrawingViewDimensionCreator
     Private Const ForcedStyleName As String = "U3,5"
     Private Const UneStrictMode As Boolean = True
+    Private Const LogStylePerDimension As Boolean = False
 
     Private Sub New()
     End Sub
@@ -167,6 +168,7 @@ Friend NotInheritable Class DrawingViewDimensionCreator
         Dim gapStep As Double = If(UneStrictMode, 0.00035R, 0.00045R) * layoutScale
         Dim dedupe As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
         Dim bandCounters As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+        Dim bandLimitSkips As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
         Dim hLim As Integer = If(uneNorm.KeepIntentionalDuplicateDimensions, 80, 3)
         Dim vLim As Integer = If(uneNorm.KeepIntentionalDuplicateDimensions, 80, 3)
         Dim rLim As Integer = If(uneNorm.KeepIntentionalDuplicateDimensions, 40, 2)
@@ -209,9 +211,8 @@ Friend NotInheritable Class DrawingViewDimensionCreator
                         Dim current As Integer = If(bandCounters.ContainsKey(it.Band), bandCounters(it.Band), 0)
                         If current >= bandMax(it.Band) Then
                             discarded += 1
-                            log?.LogLine("[DIM][UNE][BAND_LIMIT][SKIP] view=" & viewInfo.ViewIndex.ToString(CultureInfo.InvariantCulture) &
-                                         " kind=" & it.Kind & " band=" & it.Band &
-                                         " limit=" & bandMax(it.Band).ToString(CultureInfo.InvariantCulture))
+                            If Not bandLimitSkips.ContainsKey(it.Band) Then bandLimitSkips(it.Band) = 0
+                            bandLimitSkips(it.Band) += 1
                             Continue For
                         End If
                     End If
@@ -280,6 +281,18 @@ Friend NotInheritable Class DrawingViewDimensionCreator
                              " kind=" & it.Kind & " msg=" & ex.Message)
             End Try
         Next
+
+        If UneStrictMode AndAlso bandLimitSkips.Count > 0 Then
+            Dim summary As String = String.Join(",",
+                bandLimitSkips.OrderBy(Function(kv) kv.Key).
+                    Select(Function(kv)
+                               Dim lim As Integer = If(bandMax.ContainsKey(kv.Key), bandMax(kv.Key), 0)
+                               Return kv.Key & ":skipped=" & kv.Value.ToString(CultureInfo.InvariantCulture) &
+                                      "/limit=" & lim.ToString(CultureInfo.InvariantCulture)
+                           End Function))
+            log?.LogLine("[DIM][UNE][BAND_LIMIT][SUMMARY] view=" & viewInfo.ViewIndex.ToString(CultureInfo.InvariantCulture) &
+                         " " & summary)
+        End If
 
         Return created
     End Function
@@ -1020,7 +1033,9 @@ Friend NotInheritable Class DrawingViewDimensionCreator
 
         Dim finalStyleName As String = ReadDimensionStyleName(dimObj)
         If IsDimensionStyleApplied(dimObj, targetName) Then
-            log?.LogLine("[DIM][STYLE] requested=" & targetName & " final=" & finalStyleName)
+            If LogStylePerDimension Then
+                log?.LogLine("[DIM][STYLE] requested=" & targetName & " final=" & finalStyleName)
+            End If
         Else
             log?.LogLine("[DIM][STYLE][WARN] requested=" & targetName & " final=" & finalStyleName)
         End If
