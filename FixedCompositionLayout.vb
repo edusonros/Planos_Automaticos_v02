@@ -21,8 +21,8 @@ Public Module FixedCompositionLayout
     Private Const MARGIN_INNER As Double = 0.020     ' Márgen interno (20 mm)
     Private Const ISO_FACTOR As Double = 0.45       ' ISO respecto a escala principal
 
-    ' Rotación: si altura >= 2.5 * anchura -> girar para dejar horizontal
-    Private Const HORIZONTAL_ASPECT_RATIO As Double = 2.5
+    ' Rotación: si altura >= 2.0 * anchura -> girar para dejar horizontal
+    Private Const HORIZONTAL_ASPECT_RATIO As Double = 2.0
 
     ' Regla horizontal: 5 partes. main+gap+right ≈ 3/5 del ancho libre. A3: 400mm libre -> 240mm para bloque
     Private Const HORIZONTAL_BLOCK_FRACTION As Double = 3.0 / 5.0
@@ -193,21 +193,34 @@ Public Module FixedCompositionLayout
         Return kind
     End Function
 
-    ''' <summary>Girar vista principal si H/W > 2.5 para dejarla horizontal. +90 o -90 según convenga.</summary>
+    ''' <summary>Regla base: pieza esbelta vertical si H >= 2*W.</summary>
+    Public Function ShouldRotateMainViewForTallPart(width As Double, height As Double) As Boolean
+        If width <= 0 OrElse height <= 0 Then Return False
+        Return height >= (HORIZONTAL_ASPECT_RATIO * width)
+    End Function
+
+    ''' <summary>
+    ''' Decide rotación de la vista principal ANTES de distribuir vistas.
+    ''' Regla segura para A3 horizontal:
+    ''' - Tall (H>=2W) -> -90 para dejarla horizontal
+    ''' - Resto -> 0 (no forzar +90 en piezas ya horizontales)
+    ''' </summary>
     Public Function ChooseRotationToMakeMainViewHorizontal(mainView As MainViewKind, mainBox As ViewBox) As CojonudoBestFit_Bueno.ViewRotation
-        If mainBox Is Nothing OrElse mainBox.Width <= 0 Then Return CojonudoBestFit_Bueno.ViewRotation.Rot0
+        If mainBox Is Nothing OrElse mainBox.Width <= 0 OrElse mainBox.Height <= 0 Then
+            FclLog("[LAYOUT][ROTATE_CHECK] width=0 height=0 ratio=0")
+            FclLog("[LAYOUT][ROTATE_DECISION] rotate=False angle=0")
+            Return CojonudoBestFit_Bueno.ViewRotation.Rot0
+        End If
+
         Dim ratio As Double = mainBox.Height / mainBox.Width
-        If ratio > HORIZONTAL_ASPECT_RATIO Then
-            ' Vista muy vertical -> girar -90° para que quede horizontal (mejor aprovechamiento)
-            FclLog($"[ROTATION] Winner=-90 because main H/W={ratio:0.00} > {HORIZONTAL_ASPECT_RATIO}")
+        FclLog($"[LAYOUT][ROTATE_CHECK] width={mainBox.Width:0.######} height={mainBox.Height:0.######} ratio={ratio:0.###}")
+
+        If ShouldRotateMainViewForTallPart(mainBox.Width, mainBox.Height) Then
+            FclLog("[LAYOUT][ROTATE_DECISION] rotate=True angle=-90 reason=TallPart(H>=2W)")
             Return CojonudoBestFit_Bueno.ViewRotation.RotMinus90
         End If
-        If mainBox.Width > 0 AndAlso mainBox.Height / mainBox.Width < (1.0 / HORIZONTAL_ASPECT_RATIO) Then
-            ' Vista muy ancha -> girar +90° para aprovechar formato
-            FclLog($"[ROTATION] Winner=+90 because main very wide (H/W={ratio:0.00})")
-            Return CojonudoBestFit_Bueno.ViewRotation.RotPlus90
-        End If
-        FclLog($"[ROTATION] Winner=0 (main already horizontal)")
+
+        FclLog("[LAYOUT][ROTATE_DECISION] rotate=False angle=0 reason=AlreadyHorizontalOrBalanced")
         Return CojonudoBestFit_Bueno.ViewRotation.Rot0
     End Function
 

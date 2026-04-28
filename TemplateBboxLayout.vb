@@ -266,7 +266,7 @@ Public Module TemplateBboxLayout
         Dim dy = targetTop - ymax
         Try
             dv.SetOrigin(ox + dx, oy + dy)
-            log?.Invoke(String.Format(CultureInfo.InvariantCulture, "[BBOX-LAYOUT] {0} center=({1:0.######},{2:0.######})", tag, cx, cy))
+            log?.Invoke(String.Format(CultureInfo.InvariantCulture, "[LAYOUT][VIEW_CENTER] name={0} centerX={1:0.######} centerY={2:0.######}", tag, cx, cy))
         Catch ex As Exception
             log?.Invoke("[BBOX-LAYOUT] SetOrigin " & tag & ": " & ex.Message)
         End Try
@@ -274,6 +274,17 @@ Public Module TemplateBboxLayout
             app.DoIdle()
         Catch
         End Try
+
+        LogViewBbox(dv, log, tag)
+    End Sub
+
+    Private Sub LogViewBbox(dv As DrawingView, log As Action(Of String), tag As String)
+        If dv Is Nothing Then Return
+        Dim xmin As Double, ymin As Double, xmax As Double, ymax As Double
+        If Not CojonudoBestFit_Bueno.TryGetViewRangePublic(dv, xmin, ymin, xmax, ymax) Then Return
+        log?.Invoke(String.Format(CultureInfo.InvariantCulture,
+                                  "[LAYOUT][BBOX] view={0} minX={1:0.######} minY={2:0.######} maxX={3:0.######} maxY={4:0.######}",
+                                  tag, xmin, ymin, xmax, ymax))
     End Sub
 
     Public Sub ApplySlotCentersAfterInsert(
@@ -297,13 +308,13 @@ Public Module TemplateBboxLayout
         Dim belowR = MapRefRectToUsable(BelowMinX, BelowMinY, BelowMaxX, BelowMaxY, u)
 
         If vMain IsNot Nothing Then
-            MoveViewCenterToSheetPoint(app, vMain, (mainR.MinX + mainR.MaxX) / 2.0R, (mainR.MinY + mainR.MaxY) / 2.0R, log, "Main")
+            MoveViewCenterToSheetPoint(app, vMain, (mainR.MinX + mainR.MaxX) / 2.0R, (mainR.MinY + mainR.MaxY) / 2.0R, log, "Principal")
         End If
         If vRight IsNot Nothing Then
-            MoveViewCenterToSheetPoint(app, vRight, (rightR.MinX + rightR.MaxX) / 2.0R, (rightR.MinY + rightR.MaxY) / 2.0R, log, "Right")
+            MoveViewCenterToSheetPoint(app, vRight, (rightR.MinX + rightR.MaxX) / 2.0R, (rightR.MinY + rightR.MaxY) / 2.0R, log, "Lateral")
         End If
         If vBelow IsNot Nothing Then
-            MoveViewCenterToSheetPoint(app, vBelow, (belowR.MinX + belowR.MaxX) / 2.0R, (belowR.MinY + belowR.MaxY) / 2.0R, log, "Below")
+            MoveViewCenterToSheetPoint(app, vBelow, (belowR.MinX + belowR.MaxX) / 2.0R, (belowR.MinY + belowR.MaxY) / 2.0R, log, "Inferior")
         End If
 
         If plan.IncludeIso AndAlso vIso IsNot Nothing Then

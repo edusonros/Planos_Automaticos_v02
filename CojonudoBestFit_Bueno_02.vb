@@ -1246,10 +1246,19 @@ Public Module CojonudoBestFit_Bueno
             SafeUpdateView(vIso, "Iso.Update")
             DoIdleSafe(app, "REVERSE Update views")
 
-            If baseRotated Then
-                StepLog($"REVERSE: baseRotated -> rotar bloque de 3 vistas -90º")
+            ' Decisión de rotación del bloque basada en la geometría REAL de la vista principal en hoja.
+            ' Objetivo: en A3 horizontal, mantener la principal horizontal; solo rotar si sale claramente vertical.
+            Dim mainW As Double = 0, mainH As Double = 0
+            GetViewSizeSmart(vFront, mainW, mainH)
+            Dim mainRatio As Double = If(mainW > 0, mainH / mainW, 0)
+            StepLog($"[LAYOUT][ROTATE_CHECK] width={mainW:0.######} height={mainH:0.######} ratio={mainRatio:0.###}")
+
+            Dim rotateBlock As Boolean = FixedCompositionLayout.ShouldRotateMainViewForTallPart(mainW, mainH)
+            If rotateBlock Then
+                StepLog("[LAYOUT][ROTATE_DECISION] rotate=True angle=-90 reason=TallMainView(H>=2W)")
                 ApplyRotationToPrincipalViews(app, baseOri, vFront, vTop, vRight)
             Else
+                StepLog("[LAYOUT][ROTATE_DECISION] rotate=False angle=0 reason=MainAlreadyHorizontalOrBalanced")
                 ' Solo girar vista a la derecha por aspecto si aplica (nunca la inferior por aspecto)
                 Dim rw0 As Double, rh0 As Double
                 GetViewSizeSmart(vRight, rw0, rh0)

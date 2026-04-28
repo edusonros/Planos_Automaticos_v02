@@ -24,6 +24,9 @@ Public Module DraftGenerator
     Private Const ISO_FACTOR As Double = 0.45
     Private Const ISO_MARGIN_MM As Double = 0.01   ' 10 mm espacio vacío antes del marco
     Private Const ISO_SEP_ABOVE_CAJETIN_MM As Double = 0.02   ' 20 mm separación sobre el cajetín
+    ' Criterio A3 horizontal (plantilla de referencia):
+    ' bbox(vista principal) + gap + bbox(vista derecha) <= 0.37m
+    Private Const A3_MAIN_RIGHT_FREE_WIDTH_MM As Double = 0.37
 
     Private ReadOnly StandardScales As Double() = {
         1.0, 0.5, 0.2, 0.1, 0.05, 0.04, 1.0 / 30.0, 0.025, 0.02, 1.0 / 75.0, 0.01
@@ -319,7 +322,11 @@ Public Module DraftGenerator
         Dim tplInfo As LayoutEngine.TemplateInfo = LayoutEngine.GetTemplateInfo(templates(0))
         Dim baseX As Double = BASE_ORIGIN_X_MM
         Dim baseY As Double = BASE_ORIGIN_Y_MM
-        Dim effW As Double = usable.MaxX - baseX
+        Dim templateName As String = Path.GetFileName(templates(0)).ToLowerInvariant()
+        Dim isA3 As Boolean = templateName.Contains("a3")
+        Dim effWRaw As Double = usable.MaxX - baseX
+        ' En A3 horizontal, liberar ancho útil para bloque principal+dcha según criterio de plantilla (0.37m).
+        Dim effW As Double = If(isA3, Math.Max(effWRaw, A3_MAIN_RIGHT_FREE_WIDTH_MM), effWRaw)
         Dim effH As Double = baseY - usable.MinY
         If effW <= 0 OrElse effH <= 0 Then Return Nothing
 
@@ -499,10 +506,21 @@ Public Module DraftGenerator
             SafeUpdateView(vBase)
             DoIdle(app)
 
-            If layout.Rotated90 Then
+            ' Decisión REAL de giro sobre la vista ya creada (bbox en hoja), antes de posicionar el bloque.
+            Dim w0 As Double = 0, h0 As Double = 0
+            GetViewSize(vBase, w0, h0)
+            Dim ratio As Double = If(w0 > 0, h0 / w0, 0)
+            Log($"[LAYOUT][ROTATE_CHECK] width={w0:0.######} height={h0:0.######} ratio={ratio:0.###}")
+
+            Dim rotateByBbox As Boolean = FixedCompositionLayout.ShouldRotateMainViewForTallPart(w0, h0)
+            Dim shouldRotate As Boolean = layout.Rotated90 OrElse rotateByBbox
+            If shouldRotate Then
                 Try : vBase.SetRotationAngle(-Math.PI / 2.0) : Catch : End Try
                 SafeUpdateView(vBase)
                 DoIdle(app)
+                Log("[LAYOUT][ROTATE_DECISION] rotate=True angle=-90")
+            Else
+                Log("[LAYOUT][ROTATE_DECISION] rotate=False angle=0")
             End If
 
             ' Leer Range REAL de la vista insertada (antes de mover)
@@ -609,10 +627,15 @@ Public Module DraftGenerator
         Dim baseX As Double = BASE_ORIGIN_X_MM
         Dim layoutScaleFactor As Double = 1.0 / layout.Scale
         Dim effW As Double = usableArea.MaxX - baseX
+        Dim isA3Template As Boolean = Path.GetFileName(layout.TemplatePath).ToLowerInvariant().Contains("a3")
+        If isA3Template Then effW = Math.Max(effW, A3_MAIN_RIGHT_FREE_WIDTH_MM)
         Dim baseY As Double = layout.BaseTopLeftY
         Log($"[ORIGIN VARS] ===== Variables para cálculo de orígenes =====")
         Log($"[ORIGIN VARS] Constantes: BASE=(40,260)mm ISO=(320,140)mm FLAT=(35,100)mm GAP_RIGHT=25mm GAP_DOWN=25mm")
         Log($"[ORIGIN VARS] Área usable: MinX={usableArea.MinX * 1000:0}mm MaxX={usableArea.MaxX * 1000:0}mm MinY={usableArea.MinY * 1000:0}mm MaxY={usableArea.MaxY * 1000:0}mm")
+        If isA3Template Then
+            Log($"[LAYOUT][SCALE_RULE] A3 main+right free width criterion = {A3_MAIN_RIGHT_FREE_WIDTH_MM:0.###}m")
+        End If
         Log($"[ORIGIN VARS] --- BASE: X=40mm Y=260mm (origen fijo)")
         Log($"[ORIGIN VARS] --- RIGHT: X=40+baseW+25 = {layout.RightTopLeftX * 1000:0}mm | Y=baseY (misma que Base)")
         Log($"[ORIGIN VARS] --- DOWN (provisional): X=40 (misma que Base) | Y=baseTop - baseH - 25 = {layout.DownTopLeftY * 1000:0}mm")

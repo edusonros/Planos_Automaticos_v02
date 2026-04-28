@@ -358,7 +358,7 @@ Partial Class MainForm
         Me.tblTrace.RowStyles.Add(New RowStyle(SizeType.Absolute, 10.0!))
         Me.tblTrace.RowStyles.Add(New RowStyle(SizeType.Absolute, 38.0!))
 
-        Me.lblDrawingTitle.Text = "Título / Denominación" : Me.lblDrawingTitle.AutoSize = True : Me.lblDrawingTitle.Dock = DockStyle.Fill
+        Me.lblDrawingTitle.Text = "Nº Pedido" : Me.lblDrawingTitle.AutoSize = True : Me.lblDrawingTitle.Dock = DockStyle.Fill
         Me.txtTitle.Dock = DockStyle.Fill
         Me.lblOriginTitle.AutoSize = False : Me.lblOriginTitle.Dock = DockStyle.Fill : Me.lblOriginTitle.TextAlign = ContentAlignment.MiddleLeft
         Me.lblOriginTitle.Font = New Font("Segoe UI", 8.0!, FontStyle.Italic)
@@ -421,7 +421,7 @@ Partial Class MainForm
         Me.lblOriginThickness.AutoSize = False : Me.lblOriginThickness.Dock = DockStyle.Fill : Me.lblOriginThickness.TextAlign = ContentAlignment.MiddleLeft
         Me.lblOriginThickness.Font = New Font("Segoe UI", 8.0!, FontStyle.Italic)
 
-        Me.lblPedido.Text = "Pedido" : Me.lblPedido.AutoSize = True : Me.lblPedido.Dock = DockStyle.Fill
+        Me.lblPedido.Text = "Título" : Me.lblPedido.AutoSize = True : Me.lblPedido.Dock = DockStyle.Fill
         Me.txtPedido.Dock = DockStyle.Fill
         Me.lblOriginPedido.AutoSize = False : Me.lblOriginPedido.Dock = DockStyle.Fill : Me.lblOriginPedido.TextAlign = ContentAlignment.MiddleLeft
         Me.lblOriginPedido.Font = New Font("Segoe UI", 8.0!, FontStyle.Italic)

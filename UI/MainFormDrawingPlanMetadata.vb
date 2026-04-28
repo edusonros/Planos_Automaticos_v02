@@ -89,14 +89,11 @@ Partial Public Class MainForm
                 End If
             Next
 
-            tblCaj.RowStyles.Add(New RowStyle(SizeType.Absolute, 29.0!))
-            tblCaj.RowCount = 9
-            Dim fechaRow As Integer = 8
-            tblCaj.Controls.Add(New Label With {.Text = "Fecha plano", .Dock = DockStyle.Fill, .TextAlign = ContentAlignment.MiddleLeft}, 0, fechaRow)
+            ' Fecha plano fuera de UI (se mantiene solo como dato interno para no romper flujo actual).
             dtpFechaPlano = New DateTimePicker With {.Format = DateTimePickerFormat.Short, .Value = Date.Today}
-            tblCaj.Controls.Add(dtpFechaPlano, 1, fechaRow)
             lblOriginFecha = New Label With {.Text = "vacío", .Dock = DockStyle.Fill, .Font = ItalicHintFont(), .TextAlign = ContentAlignment.MiddleLeft}
-            tblCaj.Controls.Add(lblOriginFecha, 2, fechaRow)
+            dtpFechaPlano.Visible = False
+            lblOriginFecha.Visible = False
             StyleCompactEditor(dtpFechaPlano, MetaEditorWidthPx)
             AddHandler dtpFechaPlano.ValueChanged,
                 Sub(s, ev)
@@ -105,7 +102,8 @@ Partial Public Class MainForm
                     MetadataFechaSourceLabel = "manual"
                 End Sub
 
-            lblDrawingTitle.Text = "Título"
+            lblDrawingTitle.Text = "Nº Pedido"
+            lblPedido.Text = "Título"
             lblClient.Text = "Cliente"
 
             tblTracePartInner = New TableLayoutPanel With {
